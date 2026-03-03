@@ -1,549 +1,447 @@
-import React, { useState, useEffect } from 'react';
-import { Gamepad2, Copy, Check, Lock, ShieldAlert, Plus, Trash2, LogOut, KeyRound, User, Loader2, Sparkles, AlertCircle, Eye, ShieldCheck } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment } from 'firebase/firestore';
-
-// --- إعدادات Firebase ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-export default function App() {
-  // --- إدارة الحالة (State) ---
-  const [accounts, setAccounts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState(null);
-  
-  // حالة الإدارة والدخول الخفي
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [adminCodeInput, setAdminCodeInput] = useState('');
-  const [clickCount, setClickCount] = useState(0);
-  const [loginError, setLoginError] = useState('');
-
-  // حالة نموذج إضافة حساب جديد
-  const [newGame, setNewGame] = useState('');
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-
-  // حالة واجهة المستخدم
-  const [copiedField, setCopiedField] = useState(null);
-
-  // حالة تتبع الحسابات التي تم نسخها لمنع التكرار
-  const [copiedAccounts, setCopiedAccounts] = useState(() => {
-    const saved = localStorage.getItem('nexus_copied_accounts');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  // الرمز السري للإدارة
-  const SECRET_ADMIN_CODE = 'admin123';
-
-  // --- تأثيرات Firebase ---
-
-  // 1. المصادقة (Authentication)
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Vault - Premium Free Accounts</title>
+    
+    <!-- Tailwind CSS للتصميم -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: {} }
         }
-      } catch (error) {
-        console.error("Authentication Error:", error);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // 2. جلب البيانات
-  useEffect(() => {
-    if (!user) return;
-
-    const accountsRef = collection(db, 'artifacts', appId, 'public', 'data', 'steam_accounts');
+    </script>
     
-    const unsubscribe = onSnapshot(accountsRef, (snapshot) => {
-      const fetchedAccounts = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      fetchedAccounts.sort((a, b) => b.createdAt - a.createdAt);
-      
-      setAccounts(fetchedAccounts);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching accounts:", error);
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // --- معالجات الأحداث (Handlers) ---
-
-  // المنطق المخفي الجديد: 7 ضغطات على كلمة معينة في الفوتر
-  const handleSecretAdminTrigger = () => {
-    if (isAdmin) return;
-    
-    const newCount = clickCount + 1;
-    setClickCount(newCount);
-    
-    // مطلوب 7 ضغطات سريعة بدلاً من 5 لتصعيب اكتشافها صدفة
-    if (newCount >= 7) {
-      setShowAdminModal(true);
-      setClickCount(0);
-    }
-
-    // إعادة تعيين العداد بعد ثانيتين ونصف من التوقف عن الضغط
-    setTimeout(() => {
-      setClickCount(0);
-    }, 2500);
-  };
-
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (adminCodeInput === SECRET_ADMIN_CODE) {
-      setIsAdmin(true);
-      setShowAdminModal(false);
-      setAdminCodeInput('');
-      setLoginError('');
-    } else {
-      setLoginError('الرمز السري غير صحيح!');
-    }
-  };
-
-  const handleLogout = () => {
-    setIsAdmin(false);
-  };
-
-  const handleAddAccount = async (e) => {
-    e.preventDefault();
-    if (!newGame || !newUsername || !newPassword || !user) return;
-
-    try {
-      const accountsRef = collection(db, 'artifacts', appId, 'public', 'data', 'steam_accounts');
-      await addDoc(accountsRef, {
-        game: newGame,
-        username: newUsername,
-        password: newPassword,
-        copyCount: 0,
-        createdAt: Date.now()
-      });
-      
-      setNewGame('');
-      setNewUsername('');
-      setNewPassword('');
-    } catch (error) {
-      console.error("Error adding account:", error);
-    }
-  };
-
-  const handleDeleteAccount = async (id) => {
-    if (!user) return;
-    try {
-      const accountDoc = doc(db, 'artifacts', appId, 'public', 'data', 'steam_accounts', id);
-      await deleteDoc(accountDoc);
-    } catch (error) {
-      console.error("Error deleting account:", error);
-    }
-  };
-
-  const copyToClipboard = async (text, fieldId, accountId) => {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    textArea.style.top = "0";
-    textArea.style.left = "0";
-    textArea.style.opacity = "0";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    
-    try {
-      document.execCommand("copy");
-      setCopiedField(fieldId);
-      setTimeout(() => setCopiedField(null), 2000);
-
-      if (user && accountId && !copiedAccounts.includes(accountId)) {
-        const newCopiedList = [...copiedAccounts, accountId];
-        setCopiedAccounts(newCopiedList);
-        localStorage.setItem('nexus_copied_accounts', JSON.stringify(newCopiedList));
-
-        const accountDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'steam_accounts', accountId);
-        await updateDoc(accountDocRef, {
-          copyCount: increment(1)
-        });
-      }
-
-    } catch (err) {
-      console.error("حدث خطأ أثناء النسخ: ", err);
-    } finally {
-      document.body.removeChild(textArea);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#060a13] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#0d1424] via-[#060a13] to-black text-slate-200 font-sans selection:bg-cyan-500/30 selection:text-cyan-100 overflow-x-hidden" dir="rtl">
-      
-      {/* ستايل مخصص للأنميشن */}
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes float {
-          0% { transform: translateY(0px) scale(1); }
-          50% { transform: translateY(-20px) scale(1.02); }
-          100% { transform: translateY(0px) scale(1); }
-        }
+    <!-- حركات الأنيميشن المخصصة -->
+    <style>
+        @keyframes float { 0% { transform: translateY(0px) scale(1); } 50% { transform: translateY(-20px) scale(1.02); } 100% { transform: translateY(0px) scale(1); } }
         .animate-float { animation: float 8s ease-in-out infinite; }
-        
-        @keyframes float-delayed {
-          0% { transform: translateY(0px) scale(1); }
-          50% { transform: translateY(15px) scale(0.98); }
-          100% { transform: translateY(0px) scale(1); }
-        }
+        @keyframes float-delayed { 0% { transform: translateY(0px) scale(1); } 50% { transform: translateY(15px) scale(0.98); } 100% { transform: translateY(0px) scale(1); } }
         .animate-float-delayed { animation: float-delayed 10s ease-in-out infinite reverse; }
-
-        @keyframes fade-in-up {
-          0% { opacity: 0; transform: translateY(30px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in-up { 
-          animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
-          opacity: 0;
-        }
-      `}} />
-
-      {/* شبكة خلفية تزيينية مع إضاءة طافية */}
-      <div className="fixed inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.02] pointer-events-none z-0"></div>
-      <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-600/10 blur-[120px] rounded-full pointer-events-none z-0 animate-float"></div>
-      <div className="fixed bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-blue-700/10 blur-[100px] rounded-full pointer-events-none z-0 animate-float-delayed"></div>
-
-      {/* الرأس (Header) */}
-      <header className="sticky top-0 z-40 bg-[#060a13]/70 backdrop-blur-xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center relative z-10">
-          <div className="flex items-center gap-3 select-none group">
-            <div className="relative">
-              <div className="absolute inset-0 bg-cyan-500 blur-md opacity-20 group-hover:opacity-40 transition-opacity duration-500 rounded-lg"></div>
-              <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-2.5 rounded-xl relative z-10 border border-cyan-500/20 shadow-lg shadow-cyan-900/30 flex items-center justify-center">
-                 <svg className="w-6 h-6 text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    <path d="M12 8v4"/>
-                    <path d="M12 16h.01"/>
-                 </svg>
-              </div>
-            </div>
-            <div className="flex flex-col">
-              <h1 className="text-xl md:text-2xl font-black tracking-widest text-white uppercase drop-shadow-md" style={{ fontFamily: 'Impact, sans-serif' }}>
-                NEXUS <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">VAULT</span>
-              </h1>
-              <span className="text-[0.65rem] text-cyan-500/80 tracking-[0.2em] uppercase -mt-1 ml-1 font-bold">Premium Free</span>
-            </div>
-          </div>
-
-          {isAdmin && (
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-4 py-2.5 rounded-xl transition-all duration-300 text-sm font-bold shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.3)] animate-pulse"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">تسجيل خروج</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 py-16 relative z-10">
+        @keyframes fade-in-up { 0% { opacity: 0; transform: translateY(30px); } 100% { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in-up { animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
         
-        {/* قسم الترحيب (Hero Section) */}
-        {!isAdmin && (
-          <div className="mb-20 text-center space-y-6 relative">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg h-32 bg-gradient-to-r from-cyan-500/10 to-blue-600/10 blur-[80px] rounded-full pointer-events-none animate-pulse"></div>
+        body { margin: 0; padding: 0; }
+    </style>
+    
+    <!-- مكتبات React الأساسية -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- مكتبات Firebase (الإصدار المتوافق مع الاستضافة المباشرة) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#060a13] text-slate-200 font-sans overflow-x-hidden selection:bg-cyan-500/30 selection:text-cyan-100">
+    
+    <!-- المكان الذي سيعمل فيه الموقع -->
+    <div id="root"></div>
+
+    <!-- كود الموقع بالكامل -->
+    <script type="text/babel">
+
+        // --- إعدادات Firebase الخاصة بالمنصة التجريبية (تعمل فوراً) ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // تهيئة قاعدة البيانات
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        const { useState, useEffect } = React;
+
+        // --- الأيقونات (تم تحويلها لتعمل كأكواد مباشرة) ---
+        const IconSparkles = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>;
+        const IconAlertCircle = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>;
+        const IconShieldAlert = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>;
+        const IconPlus = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>;
+        const IconLoader2 = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
+        const IconGamepad2 = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" x2="10" y1="12" y2="12"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="15" x2="15.01" y1="13" y2="13"/><line x1="18" x2="18.01" y1="11" y2="11"/><rect width="20" height="12" x="2" y="6" rx="2"/></svg>;
+        const IconEye = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>;
+        const IconTrash2 = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>;
+        const IconUser = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+        const IconKeyRound = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>;
+        const IconCheck = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>;
+        const IconCopy = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>;
+        const IconLock = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;
+        const IconShieldCheck = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>;
+        const IconLogOut = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>;
+
+        function App() {
+            const [accounts, setAccounts] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [user, setUser] = useState(null);
             
-            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#131b2f]/80 backdrop-blur-sm border border-cyan-500/20 text-cyan-300 text-sm font-bold mb-4 shadow-[0_0_20px_rgba(34,211,238,0.15)] transform transition-transform hover:scale-105">
-              <Sparkles className="w-4 h-4 text-cyan-400" /> القبو السري للألعاب
-            </span>
-            
-            <h2 className="text-4xl md:text-6xl lg:text-7xl font-black text-white tracking-tight leading-tight drop-shadow-2xl">
-              العب أحدث الألعاب <br className="hidden md:block"/>
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-indigo-400 animate-gradient">
-                مجاناً بالكامل
-              </span>
-            </h2>
-            
-            <div className="bg-gradient-to-r from-transparent via-[#131b2f]/60 to-transparent backdrop-blur-md max-w-2xl mx-auto rounded-2xl p-4 mt-6 border-y border-white/5">
-              <div className="flex items-start gap-3 text-right">
-                <AlertCircle className="w-6 h-6 text-cyan-500 shrink-0 mt-0.5 animate-bounce" />
-                <p className="text-slate-300 text-sm md:text-base leading-relaxed font-medium">
-                  مرحباً بك في <strong className="text-white">Nexus Vault</strong>. نوفر لك حسابات آمنة وجاهزة لتجربة ألعابك المفضلة بدون دفع أي مبالغ. 
-                  <strong className="text-cyan-400 font-bold ml-1">الرجاء تفعيل وضع "الأوفلاين" (Offline Mode)</strong> 
-                  في ستيم عند اللعب.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [showAdminModal, setShowAdminModal] = useState(false);
+            const [adminCodeInput, setAdminCodeInput] = useState('');
+            const [clickCount, setClickCount] = useState(0);
+            const [loginError, setLoginError] = useState('');
 
-        {/* لوحة تحكم الإدارة (Admin Dashboard) */}
-        {isAdmin && (
-          <div className="mb-16 relative group animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
-            <div className="relative bg-[#0b101a]/90 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
-              <div className="flex items-center gap-4 mb-8 pb-5 border-b border-white/5">
-                <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-3 rounded-2xl border border-cyan-500/20">
-                  <ShieldAlert className="w-8 h-8 text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]" />
-                </div>
-                <div>
-                  <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400">لوحة تحكم الأدمن</h2>
-                  <p className="text-cyan-500/80 font-medium text-sm mt-1">إضافة وإدارة حسابات الألعاب في القبو</p>
-                </div>
-              </div>
-              
-              <form onSubmit={handleAddAccount} className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
-                <div className="space-y-2.5">
-                  <label className="text-sm font-bold text-slate-300 ml-1">اسم اللعبة</label>
-                  <input 
-                    type="text" 
-                    value={newGame}
-                    onChange={(e) => setNewGame(e.target.value)}
-                    placeholder="مثال: Cyberpunk 2077"
-                    className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-inner"
-                    required
-                  />
-                </div>
-                <div className="space-y-2.5">
-                  <label className="text-sm font-bold text-slate-300 ml-1">اسم المستخدم</label>
-                  <input 
-                    type="text" 
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    placeholder="Username"
-                    className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-cyan-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all text-left shadow-inner font-mono tracking-wider"
-                    dir="ltr"
-                    required
-                  />
-                </div>
-                <div className="space-y-2.5">
-                  <label className="text-sm font-bold text-slate-300 ml-1">كلمة المرور</label>
-                  <input 
-                    type="text" 
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Password"
-                    className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-cyan-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all text-left shadow-inner font-mono tracking-wider"
-                    dir="ltr"
-                    required
-                  />
-                </div>
-                <button 
-                  type="submit"
-                  disabled={!user}
-                  className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(8,145,178,0.4)] hover:shadow-[0_0_30px_rgba(8,145,178,0.6)] w-full active:scale-[0.98] transform"
-                >
-                  <Plus className="w-6 h-6" />
-                  إضافة للقبو
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+            const [newGame, setNewGame] = useState('');
+            const [newUsername, setNewUsername] = useState('');
+            const [newPassword, setNewPassword] = useState('');
 
-        {/* شبكة الحسابات (Accounts Grid) */}
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-32 text-cyan-500">
-            <div className="relative">
-              <div className="absolute inset-0 bg-cyan-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
-              <Loader2 className="w-16 h-16 animate-spin mb-6 relative z-10 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)]" />
-            </div>
-            <p className="text-slate-300 font-bold tracking-widest text-lg animate-pulse mt-4">جاري فتح قبو الألعاب...</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {accounts.length === 0 ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-24 bg-gradient-to-b from-white/[0.02] to-transparent border border-white/5 rounded-3xl border-dashed animate-fade-in-up">
-                <div className="bg-slate-800/40 p-6 rounded-full mb-5 shadow-inner border border-white/5">
-                  <Gamepad2 className="w-14 h-14 text-slate-500" />
-                </div>
-                <h3 className="text-2xl font-black text-slate-300 mb-2">القبو فارغ حالياً</h3>
-                <p className="text-slate-500 text-center max-w-md font-medium">لم يتم إضافة أي ألعاب بعد، سيتم رفع حسابات جديدة ومجانية قريباً. عُد لاحقاً!</p>
-              </div>
-            ) : (
-              accounts.map((account, index) => (
-                <div 
-                  key={account.id} 
-                  className="animate-fade-in-up group relative bg-[#0d1320]/80 backdrop-blur-xl rounded-3xl overflow-hidden border border-white/10 hover:border-cyan-500/40 transition-all duration-500 hover:shadow-[0_10px_40px_-10px_rgba(34,211,238,0.3)] hover:-translate-y-2 flex flex-col h-full"
-                  style={{ animationDelay: `${index * 0.1}s` }}
-                >
-                  
-                  {/* إضاءة خلفية للبطاقة تظهر عند التمرير */}
-                  <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+            const [copiedField, setCopiedField] = useState(null);
+            const [copiedAccounts, setCopiedAccounts] = useState(() => {
+                const saved = localStorage.getItem('nexus_copied_accounts');
+                return saved ? JSON.parse(saved) : [];
+            });
 
-                  {/* شريط علوي ملون */}
-                  <div className="h-1.5 w-full bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 opacity-80 group-hover:opacity-100 transition-opacity"></div>
-                  
-                  {/* رأس البطاقة */}
-                  <div className="p-6 border-b border-white/5 flex justify-between items-start gap-4 relative z-10">
-                    <div className="flex-1">
-                      <h3 className="text-xl font-black text-white mb-3 line-clamp-2 leading-snug drop-shadow-md group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-cyan-300 group-hover:to-blue-400 transition-all" title={account.game}>
-                        {account.game}
-                      </h3>
-                      
-                      {/* عداد المشاهدات/النسخ */}
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#060a13] border border-white/5 shadow-inner" title="عدد الأشخاص الذين نسخوا الحساب">
-                        <Eye className={`w-4 h-4 ${copiedAccounts.includes(account.id) ? 'text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]' : 'text-slate-500'}`} />
-                        <span className={`text-xs font-black font-mono tracking-widest ${copiedAccounts.includes(account.id) ? 'text-cyan-300' : 'text-slate-400'}`}>
-                          {account.copyCount || 0}
-                        </span>
-                      </div>
-                      
-                    </div>
-                    {isAdmin && (
-                      <button 
-                        onClick={() => handleDeleteAccount(account.id)}
-                        className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm shrink-0 hover:shadow-[0_0_15px_rgba(239,68,68,0.4)]"
-                        title="حذف الحساب من القبو"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
+            // 🛑 الرمز السري للإدارة 🛑
+            const SECRET_ADMIN_CODE = 'admin123';
 
-                  {/* جسم البطاقة */}
-                  <div className="p-6 space-y-6 flex-1 flex flex-col justify-center relative z-10">
+            // تسجيل الدخول
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await auth.signInWithCustomToken(__initial_auth_token);
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                    } catch (error) {
+                        console.error("Authentication Error:", error);
+                    }
+                };
+                initAuth();
+
+                const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+                    setUser(currentUser);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // جلب البيانات مع المسار الصحيح للمنصة
+            useEffect(() => {
+                if (!user) return;
+                
+                // استخدام المسار المخصص للمنصة
+                const collectionPath = `artifacts/${appId}/public/data/steam_accounts`;
+                const unsubscribe = db.collection(collectionPath).onSnapshot((snapshot) => {
+                    const fetchedAccounts = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    fetchedAccounts.sort((a, b) => b.createdAt - a.createdAt);
+                    setAccounts(fetchedAccounts);
+                    setIsLoading(false);
+                }, (error) => {
+                    console.error("Error fetching accounts:", error);
+                    setIsLoading(false);
+                });
+
+                return () => unsubscribe();
+            }, [user]);
+
+            // منطق الإدارة المخفي
+            const handleSecretAdminTrigger = () => {
+                if (isAdmin) return;
+                const newCount = clickCount + 1;
+                setClickCount(newCount);
+                if (newCount >= 7) {
+                    setShowAdminModal(true);
+                    setClickCount(0);
+                }
+                setTimeout(() => { setClickCount(0); }, 2500);
+            };
+
+            const handleAdminLogin = (e) => {
+                e.preventDefault();
+                if (adminCodeInput === SECRET_ADMIN_CODE) {
+                    setIsAdmin(true);
+                    setShowAdminModal(false);
+                    setAdminCodeInput('');
+                    setLoginError('');
+                } else {
+                    setLoginError('الرمز السري غير صحيح!');
+                }
+            };
+
+            const handleLogout = () => setIsAdmin(false);
+
+            const handleAddAccount = async (e) => {
+                e.preventDefault();
+                if (!newGame || !newUsername || !newPassword || !user) return;
+                try {
+                    const collectionPath = `artifacts/${appId}/public/data/steam_accounts`;
+                    await db.collection(collectionPath).add({
+                        game: newGame,
+                        username: newUsername,
+                        password: newPassword,
+                        copyCount: 0,
+                        createdAt: Date.now()
+                    });
+                    setNewGame(''); setNewUsername(''); setNewPassword('');
+                } catch (error) { console.error("Error adding account:", error); }
+            };
+
+            const handleDeleteAccount = async (id) => {
+                if (!user) return;
+                try {
+                    const collectionPath = `artifacts/${appId}/public/data/steam_accounts`;
+                    await db.collection(collectionPath).doc(id).delete();
+                } catch (error) { console.error("Error deleting account:", error); }
+            };
+
+            // نسخ النص وتحديث العداد (تم تحديثه لتجنب أخطاء Clipboard API في الإطارات المضمنة)
+            const copyText = async (text, fieldId, accountId) => {
+                const updateDatabase = async () => {
+                    if (user && accountId && !copiedAccounts.includes(accountId)) {
+                        const newCopiedList = [...copiedAccounts, accountId];
+                        setCopiedAccounts(newCopiedList);
+                        localStorage.setItem('nexus_copied_accounts', JSON.stringify(newCopiedList));
+                        
+                        const collectionPath = `artifacts/${appId}/public/data/steam_accounts`;
+                        await db.collection(collectionPath).doc(accountId).update({
+                            copyCount: firebase.firestore.FieldValue.increment(1)
+                        });
+                    }
+                };
+
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-999999px";
+                textArea.style.top = "-999999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                try {
+                    document.execCommand('copy');
+                    setCopiedField(fieldId);
+                    setTimeout(() => setCopiedField(null), 2000);
+                    updateDatabase();
+                } catch (err) {
+                    console.error("حدث خطأ أثناء النسخ:", err);
+                } finally {
+                    textArea.remove();
+                }
+            };
+
+            return (
+                <div className="min-h-screen relative z-10 flex flex-col">
                     
-                    {/* حقل اسم المستخدم */}
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <User className="w-4 h-4 text-cyan-500/70" /> اسم المستخدم (Username)
-                      </label>
-                      <div className="flex relative group/input">
-                        <input 
-                          type="text" 
-                          readOnly 
-                          value={account.username}
-                          className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner"
-                          dir="ltr"
-                        />
-                        <button 
-                          onClick={() => copyToClipboard(account.username, `user-${account.id}`, account.id)}
-                          className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${
-                            copiedField === `user-${account.id}` 
-                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' 
-                            : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'
-                          }`}
-                          title="نسخ اليوزرنيم"
-                        >
-                          {copiedField === `user-${account.id}` ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
+                    {/* خلفيات */}
+                    <div className="fixed inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.02] pointer-events-none z-[-1]"></div>
+                    <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-600/10 blur-[120px] rounded-full pointer-events-none z-[-1] animate-float"></div>
+                    <div className="fixed bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-blue-700/10 blur-[100px] rounded-full pointer-events-none z-[-1] animate-float-delayed"></div>
 
-                    {/* حقل كلمة المرور */}
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <KeyRound className="w-4 h-4 text-cyan-500/70" /> كلمة المرور (Password)
-                      </label>
-                      <div className="flex relative group/input">
-                        <input 
-                          type="text" 
-                          readOnly 
-                          value={account.password}
-                          className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner"
-                          dir="ltr"
-                        />
-                        <button 
-                          onClick={() => copyToClipboard(account.password, `pass-${account.id}`, account.id)}
-                          className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${
-                            copiedField === `pass-${account.id}` 
-                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' 
-                            : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'
-                          }`}
-                          title="نسخ الباسوورد"
-                        >
-                          {copiedField === `pass-${account.id}` ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
+                    {/* Header */}
+                    <header className="sticky top-0 z-40 bg-[#060a13]/70 backdrop-blur-xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+                        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center relative z-10">
+                            <div className="flex items-center gap-3 select-none group">
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-cyan-500 blur-md opacity-20 group-hover:opacity-40 transition-opacity duration-500 rounded-lg"></div>
+                                    <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-2.5 rounded-xl relative z-10 border border-cyan-500/20 shadow-lg shadow-cyan-900/30 flex items-center justify-center">
+                                        <IconGamepad2 className="w-6 h-6 text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
+                                    </div>
+                                </div>
+                                <div className="flex flex-col">
+                                    <h1 className="text-xl md:text-2xl font-black tracking-widest text-white uppercase drop-shadow-md" style={{ fontFamily: 'Impact, sans-serif' }}>
+                                        NEXUS <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">VAULT</span>
+                                    </h1>
+                                    <span className="text-[0.65rem] text-cyan-500/80 tracking-[0.2em] uppercase -mt-1 ml-1 font-bold">Premium Free</span>
+                                </div>
+                            </div>
 
-                  </div>
+                            {isAdmin && (
+                                <button onClick={handleLogout} className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-4 py-2.5 rounded-xl transition-all duration-300 text-sm font-bold shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.3)] animate-pulse">
+                                    <IconLogOut className="w-4 h-4" />
+                                    <span className="hidden sm:inline">تسجيل خروج</span>
+                                </button>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="flex-grow max-w-7xl mx-auto px-4 py-16 relative z-10 w-full">
+                        {!isAdmin && (
+                            <div className="mb-20 text-center space-y-6 relative">
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg h-32 bg-gradient-to-r from-cyan-500/10 to-blue-600/10 blur-[80px] rounded-full pointer-events-none animate-pulse"></div>
+                                <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#131b2f]/80 backdrop-blur-sm border border-cyan-500/20 text-cyan-300 text-sm font-bold mb-4 shadow-[0_0_20px_rgba(34,211,238,0.15)] transform transition-transform hover:scale-105">
+                                    <IconSparkles className="w-4 h-4 text-cyan-400" /> القبو السري للألعاب
+                                </span>
+                                <h2 className="text-4xl md:text-6xl lg:text-7xl font-black text-white tracking-tight leading-tight drop-shadow-2xl">
+                                    العب أحدث الألعاب <br className="hidden md:block"/>
+                                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-indigo-400 animate-gradient">
+                                        مجاناً بالكامل
+                                    </span>
+                                </h2>
+                                <div className="bg-gradient-to-r from-transparent via-[#131b2f]/60 to-transparent backdrop-blur-md max-w-2xl mx-auto rounded-2xl p-4 mt-6 border-y border-white/5">
+                                    <div className="flex items-start gap-3 text-right">
+                                        <IconAlertCircle className="w-6 h-6 text-cyan-500 shrink-0 mt-0.5 animate-bounce" />
+                                        <p className="text-slate-300 text-sm md:text-base leading-relaxed font-medium">
+                                            مرحباً بك في <strong className="text-white">Nexus Vault</strong>. نوفر لك حسابات آمنة وجاهزة لتجربة ألعابك المفضلة بدون دفع أي مبالغ. 
+                                            <strong className="text-cyan-400 font-bold ml-1">الرجاء تفعيل وضع "الأوفلاين" (Offline Mode)</strong> 
+                                            في ستيم عند اللعب.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {isAdmin && (
+                            <div className="mb-16 relative group animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+                                <div className="absolute -inset-1 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
+                                <div className="relative bg-[#0b101a]/90 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+                                    <div className="flex items-center gap-4 mb-8 pb-5 border-b border-white/5">
+                                        <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-3 rounded-2xl border border-cyan-500/20">
+                                            <IconShieldAlert className="w-8 h-8 text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400">لوحة تحكم الأدمن</h2>
+                                            <p className="text-cyan-500/80 font-medium text-sm mt-1">إضافة وإدارة حسابات الألعاب في القبو</p>
+                                        </div>
+                                    </div>
+                                    <form onSubmit={handleAddAccount} className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                                        <div className="space-y-2.5">
+                                            <label className="text-sm font-bold text-slate-300 ml-1">اسم اللعبة</label>
+                                            <input type="text" value={newGame} onChange={(e) => setNewGame(e.target.value)} placeholder="مثال: Cyberpunk 2077" className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-inner" required />
+                                        </div>
+                                        <div className="space-y-2.5">
+                                            <label className="text-sm font-bold text-slate-300 ml-1">اسم المستخدم</label>
+                                            <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="Username" className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-cyan-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all text-left shadow-inner font-mono tracking-wider" dir="ltr" required />
+                                        </div>
+                                        <div className="space-y-2.5">
+                                            <label className="text-sm font-bold text-slate-300 ml-1">كلمة المرور</label>
+                                            <input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Password" className="w-full bg-[#131b2f] border border-white/10 rounded-xl px-5 py-3.5 text-cyan-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/20 transition-all text-left shadow-inner font-mono tracking-wider" dir="ltr" required />
+                                        </div>
+                                        <button type="submit" disabled={!user} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(8,145,178,0.4)] hover:shadow-[0_0_30px_rgba(8,145,178,0.6)] w-full active:scale-[0.98] transform">
+                                            <IconPlus className="w-6 h-6" /> إضافة للقبو
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {isLoading ? (
+                            <div className="flex flex-col items-center justify-center py-32 text-cyan-500">
+                                <div className="relative flex justify-center items-center">
+                                    <div className="absolute inset-0 bg-cyan-500 blur-xl opacity-20 rounded-full animate-pulse w-16 h-16"></div>
+                                    <IconLoader2 className="w-16 h-16 animate-spin relative z-10 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)]" />
+                                </div>
+                                <p className="text-slate-300 font-bold tracking-widest text-lg animate-pulse mt-6">جاري فتح قبو الألعاب...</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                {accounts.length === 0 ? (
+                                    <div className="col-span-full flex flex-col items-center justify-center py-24 bg-gradient-to-b from-white/[0.02] to-transparent border border-white/5 rounded-3xl border-dashed animate-fade-in-up">
+                                        <div className="bg-slate-800/40 p-6 rounded-full mb-5 shadow-inner border border-white/5">
+                                            <IconGamepad2 className="w-14 h-14 text-slate-500" />
+                                        </div>
+                                        <h3 className="text-2xl font-black text-slate-300 mb-2">القبو فارغ حالياً</h3>
+                                        <p className="text-slate-500 text-center max-w-md font-medium">لم يتم إضافة أي ألعاب بعد، سيتم رفع حسابات جديدة ومجانية قريباً. عُد لاحقاً!</p>
+                                    </div>
+                                ) : (
+                                    accounts.map((account, index) => (
+                                        <div key={account.id} className="animate-fade-in-up group relative bg-[#0d1320]/80 backdrop-blur-xl rounded-3xl overflow-hidden border border-white/10 hover:border-cyan-500/40 transition-all duration-500 hover:shadow-[0_10px_40px_-10px_rgba(34,211,238,0.3)] hover:-translate-y-2 flex flex-col h-full" style={{ animationDelay: `${index * 0.1}s` }}>
+                                            <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+                                            <div className="h-1.5 w-full bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 opacity-80 group-hover:opacity-100 transition-opacity"></div>
+                                            <div className="p-6 border-b border-white/5 flex justify-between items-start gap-4 relative z-10">
+                                                <div className="flex-1">
+                                                    <h3 className="text-xl font-black text-white mb-3 line-clamp-2 leading-snug drop-shadow-md group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-cyan-300 group-hover:to-blue-400 transition-all" title={account.game}>
+                                                        {account.game}
+                                                    </h3>
+                                                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#060a13] border border-white/5 shadow-inner" title="عدد الأشخاص الذين نسخوا الحساب">
+                                                        <IconEye className={`w-4 h-4 ${copiedAccounts.includes(account.id) ? 'text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]' : 'text-slate-500'}`} />
+                                                        <span className={`text-xs font-black font-mono tracking-widest ${copiedAccounts.includes(account.id) ? 'text-cyan-300' : 'text-slate-400'}`}>
+                                                            {account.copyCount || 0}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                {isAdmin && (
+                                                    <button onClick={() => handleDeleteAccount(account.id)} className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm shrink-0 hover:shadow-[0_0_15px_rgba(239,68,68,0.4)]" title="حذف الحساب من القبو">
+                                                        <IconTrash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="p-6 space-y-6 flex-1 flex flex-col justify-center relative z-10">
+                                                <div className="space-y-2">
+                                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                        <IconUser className="w-4 h-4 text-cyan-500/70" /> اسم المستخدم
+                                                    </label>
+                                                    <div className="flex relative group/input">
+                                                        <input type="text" readOnly value={account.username} className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner" dir="ltr" />
+                                                        <button onClick={() => copyText(account.username, `user-${account.id}`, account.id)} className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${copiedField === `user-${account.id}` ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'}`} title="نسخ اليوزرنيم">
+                                                            {copiedField === `user-${account.id}` ? <IconCheck className="w-5 h-5" /> : <IconCopy className="w-5 h-5" />}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                        <IconKeyRound className="w-4 h-4 text-cyan-500/70" /> كلمة المرور
+                                                    </label>
+                                                    <div className="flex relative group/input">
+                                                        <input type="text" readOnly value={account.password} className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner" dir="ltr" />
+                                                        <button onClick={() => copyText(account.password, `pass-${account.id}`, account.id)} className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${copiedField === `pass-${account.id}` ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'}`} title="نسخ الباسوورد">
+                                                            {copiedField === `pass-${account.id}` ? <IconCheck className="w-5 h-5" /> : <IconCopy className="w-5 h-5" />}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* نافذة الأدمن */}
+                    {showAdminModal && (
+                        <div className="fixed inset-0 bg-[#060a13]/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
+                            <div className="bg-[#0d1320] border border-cyan-500/30 rounded-3xl shadow-[0_0_80px_rgba(34,211,238,0.15)] w-full max-w-sm overflow-hidden transform animate-in fade-in zoom-in duration-300">
+                                <div className="bg-[#131b2f]/80 p-5 border-b border-white/5 flex justify-between items-center">
+                                    <div className="flex items-center gap-3 text-white font-black text-lg">
+                                        <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-2 rounded-xl border border-cyan-500/20">
+                                            <IconLock className="w-5 h-5 text-cyan-400" />
+                                        </div>
+                                        وصول المشرف
+                                    </div>
+                                    <button onClick={() => { setShowAdminModal(false); setLoginError(''); setAdminCodeInput(''); }} className="text-slate-500 hover:text-white bg-white/5 hover:bg-red-500/20 rounded-full w-8 h-8 flex items-center justify-center transition-colors text-xl leading-none">&times;</button>
+                                </div>
+                                <form onSubmit={handleAdminLogin} className="p-7 space-y-6">
+                                    <p className="text-sm text-slate-400 text-center font-medium leading-relaxed">
+                                        أنت الآن تحاول فتح أبواب القبو كمسؤول.<br/>أدخل شفرة التشفير للمتابعة.
+                                    </p>
+                                    <div className="space-y-2">
+                                        <input type="password" value={adminCodeInput} onChange={(e) => setAdminCodeInput(e.target.value)} placeholder="••• الرمز السري •••" className="w-full bg-[#060a13] border border-white/10 rounded-xl px-4 py-4 text-cyan-300 text-center text-xl font-bold tracking-[0.4em] focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30 transition-all shadow-inner" dir="ltr" autoFocus />
+                                        {loginError && <p className="text-red-400 text-sm text-center font-bold pt-2 animate-pulse">{loginError}</p>}
+                                    </div>
+                                    <button type="submit" className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black py-4 px-4 rounded-xl transition-all shadow-[0_4px_20px_rgba(8,145,178,0.4)] hover:shadow-[0_4px_30px_rgba(8,145,178,0.6)] active:scale-[0.98] transform tracking-wide">
+                                        إلغاء القفل
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    <footer className="border-t border-white/5 mt-auto py-8 relative z-10 bg-[#060a13]/80 backdrop-blur-sm">
+                        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-500 text-xs font-bold tracking-wider uppercase">
+                            <p className="flex items-center gap-2">
+                                © {new Date().getFullYear()} <span className="text-slate-300 font-black tracking-widest">NEXUS VAULT</span>
+                            </p>
+                            <div className="flex items-center gap-2 opacity-50">
+                                <IconShieldCheck className="w-4 h-4" />
+                                <span>
+                                    <span onClick={handleSecretAdminTrigger} className="select-none cursor-default">Secured</span> Premium Accounts
+                                </span>
+                            </div>
+                        </div>
+                    </footer>
                 </div>
-              ))
-            )}
-          </div>
-        )}
-      </main>
+            );
+        }
 
-      {/* نافذة تسجيل دخول الإدارة (Modal) */}
-      {showAdminModal && (
-        <div className="fixed inset-0 bg-[#060a13]/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d1320] border border-cyan-500/30 rounded-3xl shadow-[0_0_80px_rgba(34,211,238,0.15)] w-full max-w-sm overflow-hidden transform animate-in fade-in zoom-in duration-300">
-            <div className="bg-[#131b2f]/80 p-5 border-b border-white/5 flex justify-between items-center">
-              <div className="flex items-center gap-3 text-white font-black text-lg">
-                <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-2 rounded-xl border border-cyan-500/20">
-                  <Lock className="w-5 h-5 text-cyan-400" />
-                </div>
-                وصول المشرف
-              </div>
-              <button 
-                onClick={() => { setShowAdminModal(false); setLoginError(''); setAdminCodeInput(''); }}
-                className="text-slate-500 hover:text-white bg-white/5 hover:bg-red-500/20 rounded-full w-8 h-8 flex items-center justify-center transition-colors text-xl leading-none"
-              >
-                &times;
-              </button>
-            </div>
-            
-            <form onSubmit={handleAdminLogin} className="p-7 space-y-6">
-              <p className="text-sm text-slate-400 text-center font-medium leading-relaxed">
-                أنت الآن تحاول فتح أبواب القبو كمسؤول.<br/>أدخل شفرة التشفير للمتابعة.
-              </p>
-              
-              <div className="space-y-2">
-                <input 
-                  type="password" 
-                  value={adminCodeInput}
-                  onChange={(e) => setAdminCodeInput(e.target.value)}
-                  placeholder="••• الرمز السري •••"
-                  className="w-full bg-[#060a13] border border-white/10 rounded-xl px-4 py-4 text-cyan-300 text-center text-xl font-bold tracking-[0.4em] focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30 transition-all shadow-inner"
-                  dir="ltr"
-                  autoFocus
-                />
-                {loginError && <p className="text-red-400 text-sm text-center font-bold pt-2 animate-pulse">{loginError}</p>}
-              </div>
-              
-              <button 
-                type="submit"
-                className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black py-4 px-4 rounded-xl transition-all shadow-[0_4px_20px_rgba(8,145,178,0.4)] hover:shadow-[0_4px_30px_rgba(8,145,178,0.6)] active:scale-[0.98] transform tracking-wide"
-              >
-                إلغاء القفل
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* التذييل (Footer) */}
-      <footer className="border-t border-white/5 mt-16 py-8 relative z-10 bg-[#060a13]/80 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-500 text-xs font-bold tracking-wider uppercase">
-          <p className="flex items-center gap-2">
-            © {new Date().getFullYear()} <span className="text-slate-300 font-black tracking-widest">NEXUS VAULT</span>
-          </p>
-          
-          <div className="flex items-center gap-2 opacity-50">
-            <ShieldCheck className="w-4 h-4" />
-            {/* الزر السري: يضغط 7 مرات على كلمة Secured */}
-            <span>
-              <span onClick={handleSecretAdminTrigger} className="select-none">Secured</span> Premium Accounts
-            </span>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-}
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
