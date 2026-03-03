@@ -406,4 +406,144 @@ export default function App() {
                     </div>
                     {isAdmin && (
                       <button 
-                        onCli
+                        onClick={() => handleDeleteAccount(account.id)}
+                        className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm shrink-0 hover:shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                        title="حذف الحساب من القبو"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* جسم البطاقة */}
+                  <div className="p-6 space-y-6 flex-1 flex flex-col justify-center relative z-10">
+                    
+                    {/* حقل اسم المستخدم */}
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <User className="w-4 h-4 text-cyan-500/70" /> اسم المستخدم (Username)
+                      </label>
+                      <div className="flex relative group/input">
+                        <input 
+                          type="text" 
+                          readOnly 
+                          value={account.username}
+                          className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner"
+                          dir="ltr"
+                        />
+                        <button 
+                          onClick={() => copyToClipboard(account.username, `user-${account.id}`, account.id)}
+                          className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${
+                            copiedField === `user-${account.id}` 
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' 
+                            : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'
+                          }`}
+                          title="نسخ اليوزرنيم"
+                        >
+                          {copiedField === `user-${account.id}` ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* حقل كلمة المرور */}
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <KeyRound className="w-4 h-4 text-cyan-500/70" /> كلمة المرور (Password)
+                      </label>
+                      <div className="flex relative group/input">
+                        <input 
+                          type="text" 
+                          readOnly 
+                          value={account.password}
+                          className="w-full bg-[#060a13] border border-white/5 group-hover/input:border-white/10 rounded-r-xl px-4 py-3.5 text-sm font-mono text-cyan-50 font-medium outline-none text-left transition-colors shadow-inner"
+                          dir="ltr"
+                        />
+                        <button 
+                          onClick={() => copyToClipboard(account.password, `pass-${account.id}`, account.id)}
+                          className={`px-5 border-y border-l border-white/5 rounded-l-xl flex items-center justify-center transition-all ${
+                            copiedField === `pass-${account.id}` 
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[inset_0_0_15px_rgba(16,185,129,0.2)]' 
+                            : 'bg-[#131b2f] hover:bg-cyan-600 hover:text-white hover:border-cyan-500 text-slate-400 shadow-md'
+                          }`}
+                          title="نسخ الباسوورد"
+                        >
+                          {copiedField === `pass-${account.id}` ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* نافذة تسجيل دخول الإدارة (Modal) */}
+      {showAdminModal && (
+        <div className="fixed inset-0 bg-[#060a13]/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d1320] border border-cyan-500/30 rounded-3xl shadow-[0_0_80px_rgba(34,211,238,0.15)] w-full max-w-sm overflow-hidden transform animate-in fade-in zoom-in duration-300">
+            <div className="bg-[#131b2f]/80 p-5 border-b border-white/5 flex justify-between items-center">
+              <div className="flex items-center gap-3 text-white font-black text-lg">
+                <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-2 rounded-xl border border-cyan-500/20">
+                  <Lock className="w-5 h-5 text-cyan-400" />
+                </div>
+                وصول المشرف
+              </div>
+              <button 
+                onClick={() => { setShowAdminModal(false); setLoginError(''); setAdminCodeInput(''); }}
+                className="text-slate-500 hover:text-white bg-white/5 hover:bg-red-500/20 rounded-full w-8 h-8 flex items-center justify-center transition-colors text-xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <form onSubmit={handleAdminLogin} className="p-7 space-y-6">
+              <p className="text-sm text-slate-400 text-center font-medium leading-relaxed">
+                أنت الآن تحاول فتح أبواب القبو كمسؤول.<br/>أدخل شفرة التشفير للمتابعة.
+              </p>
+              
+              <div className="space-y-2">
+                <input 
+                  type="password" 
+                  value={adminCodeInput}
+                  onChange={(e) => setAdminCodeInput(e.target.value)}
+                  placeholder="••• الرمز السري •••"
+                  className="w-full bg-[#060a13] border border-white/10 rounded-xl px-4 py-4 text-cyan-300 text-center text-xl font-bold tracking-[0.4em] focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30 transition-all shadow-inner"
+                  dir="ltr"
+                  autoFocus
+                />
+                {loginError && <p className="text-red-400 text-sm text-center font-bold pt-2 animate-pulse">{loginError}</p>}
+              </div>
+              
+              <button 
+                type="submit"
+                className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black py-4 px-4 rounded-xl transition-all shadow-[0_4px_20px_rgba(8,145,178,0.4)] hover:shadow-[0_4px_30px_rgba(8,145,178,0.6)] active:scale-[0.98] transform tracking-wide"
+              >
+                إلغاء القفل
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* التذييل (Footer) */}
+      <footer className="border-t border-white/5 mt-16 py-8 relative z-10 bg-[#060a13]/80 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-500 text-xs font-bold tracking-wider uppercase">
+          <p className="flex items-center gap-2">
+            © {new Date().getFullYear()} <span className="text-slate-300 font-black tracking-widest">NEXUS VAULT</span>
+          </p>
+          
+          <div className="flex items-center gap-2 opacity-50">
+            <ShieldCheck className="w-4 h-4" />
+            {/* الزر السري: يضغط 7 مرات على كلمة Secured */}
+            <span>
+              <span onClick={handleSecretAdminTrigger} className="select-none">Secured</span> Premium Accounts
+            </span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
